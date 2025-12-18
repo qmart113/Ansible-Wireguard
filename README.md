@@ -37,6 +37,8 @@ The result is a fully automated, repeatable, and secure WireGuard deployment wit
 
 ---
 
+##
+
 inventory.ini – Ansible inventory file defining the WireGuard server host
 
 playbook.yml – Top-level Ansible playbook that runs the wireguard role
