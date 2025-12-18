@@ -1,215 +1,226 @@
-Ansible WireGuard VPN Setup
+# Ansible WireGuard VPN Setup
 
-This repository contains an Ansible playbook and role for automating the setup of a WireGuard VPN server and multiple client configurations. It installs WireGuard, generates all server and client keys, builds the wg0.conf server config, creates 10 client configs, configures routing and firewall/NAT rules, and enables the VPN interface to start on boot.
+This repository contains an Ansible playbook and role for automating the setup of a **WireGuard VPN server** and multiple **client configurations**. It installs WireGuard, generates all server and client keys, builds the `wg0.conf` server config, creates 10 client configs, configures routing and firewall/NAT rules, and enables the VPN interface to start on boot.
 
 The result is a fully automated, repeatable, and secure WireGuard deployment with a single command.
 
-Prerequisites
+---
 
-Linode server or dedicated server
+## Prerequisites
 
-Ansible installed on your control node (e.g., Ubuntu VM)
+- Linode server or dedicated server  
+- Ansible installed on your control node (e.g., Ubuntu VM)  
+- Target Ubuntu/Debian-based system for the WireGuard server  
+- SSH key-based access from control node → server  
+- Root or sudo access on the server  
 
-Target Ubuntu/Debian-based system for the WireGuard server (e.g., Linode)
+---
 
-SSH key-based access from control node → target server
+## Directory Structure
 
-Sudo/root privileges on the target server
-
-Directory Structure
+```text
 .
 ├── inventory.ini
 ├── playbook.yml
 └── roles/
     └── wireguard/
         ├── defaults/
-        │   └── main.yml
-        ├── handlers/
-        │   └── main.yml
-        ├── tasks/
-        │   └── main.yml
-        └── templates/
-            ├── wg0.conf.j2
-            └── client.conf.j2
+    │ └── main.yml
+    ├── handlers/
+    │ └── main.yml
+    ├── tasks/
+    │ └── main.yml
+    └── templates/
+        ├── wg0.conf.j2
+        └── client.conf.j2
 
-File Descriptions
+```
 
-inventory.ini – Defines the WireGuard server host
+---
 
-playbook.yml – Top-level Ansible playbook that runs the wireguard role
+## File Descriptions
 
-roles/wireguard/defaults/main.yml – Default variables (VPN subnet, client count, port, etc.)
+- **inventory.ini** – Lists your WireGuard server host  
+- **playbook.yml** – Main playbook  
+- **roles/wireguard/defaults/main.yml** – All configuration variables  
+- **roles/wireguard/tasks/main.yml** – Installs WireGuard, generates keys, writes configs  
+- **roles/wireguard/templates/** – Jinja2 templates that generate actual `.conf` files  
 
-roles/wireguard/handlers/main.yml – Restarts wg-quick@wg0
+---
 
-roles/wireguard/tasks/main.yml – Automation logic (packages, keys, configs, routing, service)
+## Configuration
 
-roles/wireguard/templates/wg0.conf.j2 – Jinja2 server WireGuard config
+### Inventory File (`inventory.ini`)
 
-roles/wireguard/templates/client.conf.j2 – Jinja2 client WireGuard configs
-
-Configuration
-1. Inventory
-
-Edit inventory.ini and set your WireGuard server’s IP and SSH user:
-
+Edit inventory.ini and set your WireGuard server’s IP/DNS and SSH user:
+```
 [wireguard]
 wgserver ansible_host=YOUR_SERVER_IP ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ed25519
+```
 
+- ansible_host – Public IP or DNS of your WireGuard server (e.g., Linode)
 
-ansible_host = your server IP (e.g., Linode)
+- ansible_user – SSH user (often root on fresh cloud servers)
 
-ansible_user = SSH user
+- ansible_ssh_private_key_file – Path to the private key used for authentication
 
-ansible_ssh_private_key_file = your SSH private key path
+---
 
-2. WireGuard Variables
+## WireGuard variables
 
-Key variables are located in:
+Key variables are defined in roles/wireguard/defaults/main.yml. Examples:
 
-roles/wireguard/defaults/main.yml
+```
+wireguard_network: "10.10.10.0/24"   # VPN subnet
+wireguard_interface: "wg0"           # WireGuard interface name
+wireguard_port: 51820                # UDP port WireGuard listens on
+wireguard_client_count: 10           # Number of client configs to generate
+wireguard_dns: "1.1.1.1"             # DNS pushed to clients
+wireguard_allowed_ips: "0.0.0.0/0, ::/0"  # Full tunnel by default
+wireguard_persistent_keepalive: 25   # Keepalive for roaming clients
 
+# Optional: External interface and endpoint
+external_interface: ""               # If blank, auto-detected (e.g., eth0)
+wireguard_endpoint: ""               # If blank, uses ansible_host
+```
+---
 
-Important options include:
-
-wireguard_network: "10.10.10.0/24"
-wireguard_interface: "wg0"
-wireguard_port: 51820
-wireguard_client_count: 10
-wireguard_dns: "1.1.1.1"
-wireguard_allowed_ips: "0.0.0.0/0, ::/0"
-wireguard_persistent_keepalive: 25
-external_interface: ""
-wireguard_endpoint: ""
-
-Usage
+## Usage
 
 Run the playbook:
 
+``` 
 ansible-playbook -i inventory.ini playbook.yml
 
+```
 
 This will:
 
-Install WireGuard
+- Install WireGuard  
+- Enable IPv4 forwarding  
+- Detect external interface  
+- Generate server keys  
+- Generate 10 client keypairs + preshared keys  
+- Render /etc/wireguard/wg0.conf on the server  
+- Render  /etc/wireguard/clients/client1.conf … client10.con 
+- Enable and start `wg-quick@wg0`  
+- Show WireGuard status  
 
-Enable IPv4 forwarding
+---
 
-Auto-detect outbound interface (if not set)
+## What the Playbook Does (Details)
 
-Generate:
+- Installs required packages:
 
-Server private/public key
+- wireguard, wireguard-tools, iproute2, iptables, qrencode
 
-10 client keypairs
+- Enables IPv4 forwarding via sysctl
 
-10 preshared keys
+- Auto-detects the outbound network interface (if external_interface is not set)
 
-Render:
+- Generates and stores:
 
-/etc/wireguard/wg0.conf
+- Server keypair under /etc/wireguard/
 
-/etc/wireguard/clients/client1.conf … client10.conf
+- Client keys + preshared keys under /etc/wireguard/clients/
 
-Enable and start wg-quick@wg0
+- Builds a dynamic list of clients with:
 
-Show WireGuard runtime status
+- Unique IPs in the VPN subnet (e.g., 10.10.10.2/32 … 10.10.10.11/32)
 
-What the Playbook Does (Detailed)
-Installs required packages
+- Matching keys and preshared keys
 
-wireguard
+- Renders wg0.conf with one [Peer] entry per client
 
-wireguard-tools
+- Renders each client .conf file ready to import into a WireGuard client app
 
-iproute2
+- Applies NAT (MASQUERADE) rules for internet access through the server
 
-iptables
+- Enables and starts wg-quick@wg0 using systemd
 
-qrencode
+- Prints wg show for status after configuration
 
-Network configuration
+  ---
 
-Enables IPv4 forwarding
-
-Sets MASQUERADE NAT rule for Internet access
-
-Auto-detects external interface (if not set)
-
-Key generation
-
-Server private/public keys → /etc/wireguard/
-
-Client keys (private/public/psk) → /etc/wireguard/clients/
-
-Builds a dynamic list of clients with VPN IP assignments
-
-Configuration rendering
-
-Renders WireGuard server config
-
-Renders all client configs ready for import
-
-Enables wg-quick auto-start
-
-Verification
-
-Shows wg show output after configuration
-
-Post-Installation
+  ## Post-Installation
 
 After running the playbook:
 
-Server config:
-/etc/wireguard/wg0.conf
+The server config will be at:
 
-Client configs:
+```
+/etc/wireguard/wg0.conf
+```
+
+- Client configs will be at:
+
+```
 /etc/wireguard/clients/client1.conf
 /etc/wireguard/clients/client2.conf
 ...
 /etc/wireguard/clients/client10.conf
+```
 
-
-You can retrieve a config:
-
+You can copy a client config down to your local machine with scp, for example:
+```
 scp root@YOUR_SERVER_IP:/etc/wireguard/clients/client1.conf ~/client1.conf
+```
 
+Then import client1.conf into the WireGuard client on Windows, macOS, Linux, iOS, or Android.
 
-Then import into WireGuard on:
+---
 
-Windows
+Notes
 
-macOS
+- This playbook assumes a Debian/Ubuntu-based WireGuard server (e.g., Ubuntu on Linode).
+.
+- wireguard_client_count can be increased or decreased to change how many client configs are generated.
 
-Linux
+- The playbook is designed around a single central hub (wg0 on one server) and multiple clients.
 
-Android
+---
 
-iOS
+## Troubleshooting
 
-Troubleshooting
+If you run into issues:
 
-Check WireGuard status:
+- Check Ansible output for failed tasks or error messages.
 
+- Verify WireGuard status on the server:
+ ```
 sudo wg show
 sudo systemctl status wg-quick@wg0
+```
+
+- Check that IP forwarding and NAT are working:
+
+- Confirm net.ipv4.ip_forward=1
+
+- Inspect iptables rules for the MASQUERADE rule on the external interface
+
+- Make sure the UDP port (wireguard_port, default 51820) is allowed in any cloud firewall or security group.
+
+- Confirm client devices use the correct config and that their system clocks are reasonably in sync.
+
+## Security Considerations
+
+- Treat private keys and client configs as sensitive secrets.
+
+- Rotate keys and regenerate configs if you suspect compromise.
+
+- Consider using separate servers or configs for different roles or trust levels.
+
+- In production, restrict management SSH access and lock down the WireGuard port to only what you need.
+
+## Contributing
+
+Issues and pull requests are welcome. If you have ideas to:
+
+- Add support for multiple servers
+
+- Add QR code output for mobile clients
+
+- Integrate with additional firewall tooling (e.g., ufw, nftables)
 
 
-Check NAT rules:
 
-sudo iptables -t nat -L -n -v
-
-
-Check service logs:
-
-sudo journalctl -u wg-quick@wg0
-
-Security Considerations
-
-Treat all private keys and client configs as sensitive
-
-Rotate keys if compromise is suspected
-
-Restrict SSH access
-
-Consider cloud firewall rules for port 51820/UDP
