@@ -202,25 +202,6 @@ sudo systemctl status wg-quick@wg0
 
 - Confirm client devices use the correct config and that their system clocks are reasonably in sync.
 
-## Security Considerations
-
-- Treat private keys and client configs as sensitive secrets.
-
-- Rotate keys and regenerate configs if you suspect compromise.
-
-- Consider using separate servers or configs for different roles or trust levels.
-
-- In production, restrict management SSH access and lock down the WireGuard port to only what you need.
-
-## Contributing
-
-Issues and pull requests are welcome. If you have ideas to:
-
-- Add support for multiple servers
-
-- Add QR code output for mobile clients
-
-- Integrate with additional firewall tooling (e.g., ufw, nftables)
 
 
 
