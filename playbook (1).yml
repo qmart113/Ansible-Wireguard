@@ -1,9 +1,0 @@
----
-- name: Provision WireGuard VPN server and clients
-  hosts: wireguard
-  become: true
-  vars:
-    # Override defaults here if you want, or edit defaults/main.yml
-    # wireguard_client_count: 10
-  roles:
-    - wireguard
