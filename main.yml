@@ -1,0 +1,43 @@
+---
+# VPN network in CIDR
+wireguard_network: "10.10.10.0/24"
+
+# Derived helpers: 10.10.10 part and netmask bits
+wireguard_network_prefix: "{{ wireguard_network.split('/')[0].rsplit('.', 1)[0] }}"
+wireguard_netmask: "{{ wireguard_network.split('/')[1] }}"
+
+# Server address inside VPN (e.g. 10.10.10.1)
+wireguard_server_address: "{{ wireguard_network_prefix }}.1"
+
+# WireGuard interface
+wireguard_interface: "wg0"
+
+# UDP port to listen on
+wireguard_port: 51820
+
+# Number of client configs to generate
+wireguard_client_count: 10   # change to 10 if you want 10 clients
+
+# DNS presented to clients (Cloudflare)
+wireguard_dns: "1.1.1.1"
+
+# MTU tweak
+wireguard_mtu: 1375
+
+# Allowed IPs for clients
+wireguard_allowed_ips: "0.0.0.0/0, ::/0"
+
+# Keepalive for roaming clients
+wireguard_persistent_keepalive: 25
+
+# Where configs live on the server
+wireguard_dir: "/etc/wireguard"
+wireguard_clients_dir: "/etc/wireguard/clients"
+
+# External interface (out to the Internet)
+# If not manually set, we'll auto-detect using ansible_default_ipv4.interface
+external_interface: ""
+
+# Endpoint host for clients (public IP or DNS)
+# If blank, we'll use ansible_host from the inventory
+wireguard_endpoint: ""

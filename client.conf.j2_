@@ -1,0 +1,14 @@
+# {{ item.name }} WireGuard client config
+
+[Interface]
+PrivateKey = {{ item.private }}
+Address = {{ item.ip }}
+DNS = {{ wireguard_dns }}
+MTU = {{ wireguard_mtu }}
+
+[Peer]
+PublicKey = {{ wireguard_server_public_key }}
+PresharedKey = {{ item.psk }}
+Endpoint = {{ resolved_wireguard_endpoint }}:{{ wireguard_port }}
+AllowedIPs = {{ wireguard_allowed_ips }}
+PersistentKeepalive = {{ wireguard_persistent_keepalive }}

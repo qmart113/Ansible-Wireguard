@@ -1,0 +1,217 @@
+---
+- name: Gather facts
+  ansible.builtin.setup:
+
+- name: Install WireGuard and tools
+  ansible.builtin.package:
+    name:
+      - wireguard
+      - wireguard-tools
+      - iproute2
+      - iptables
+      - qrencode
+    state: present
+  become: true
+
+- name: Ensure WireGuard directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ wireguard_dir }}"
+    - "{{ wireguard_clients_dir }}"
+  become: true
+
+- name: Determine external interface if not set
+  ansible.builtin.set_fact:
+    external_interface: "{{ ansible_default_ipv4.interface }}"
+  when: external_interface | length == 0
+
+- name: Enable IPv4 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    state: present
+    reload: true
+  become: true
+
+# ----------------- SERVER KEYS -----------------
+
+- name: Generate server private and public keys if missing
+  ansible.builtin.command: >
+    bash -c 'umask 077; wg genkey |
+    tee {{ wireguard_dir }}/server_privatekey |
+    wg pubkey > {{ wireguard_dir }}/server_publickey'
+  args:
+    creates: "{{ wireguard_dir }}/server_publickey"
+  become: true
+
+- name: Read server private key
+  ansible.builtin.slurp:
+    src: "{{ wireguard_dir }}/server_privatekey"
+  register: server_privatekey_slurp
+  become: true
+
+- name: Set server private key fact
+  ansible.builtin.set_fact:
+    wireguard_server_private_key: "{{ server_privatekey_slurp.content | b64decode | trim }}"
+
+- name: Read server public key
+  ansible.builtin.slurp:
+    src: "{{ wireguard_dir }}/server_publickey"
+  register: server_publickey_slurp
+  become: true
+
+- name: Set server public key fact
+  ansible.builtin.set_fact:
+    wireguard_server_public_key: "{{ server_publickey_slurp.content | b64decode | trim }}"
+
+# ----------------- ENDPOINT -----------------
+
+- name: Figure out endpoint host
+  ansible.builtin.set_fact:
+    resolved_wireguard_endpoint: >-
+      {{ wireguard_endpoint
+         if wireguard_endpoint | length > 0
+         else (hostvars[inventory_hostname].ansible_host
+               | default(ansible_default_ipv4.address)) }}
+
+# ----------------- CLIENT KEYS (GENERATE) -----------------
+
+- name: Generate client private keys
+  ansible.builtin.command: wg genkey
+  loop: "{{ range(1, wireguard_client_count + 1) | list }}"
+  loop_control:
+    loop_var: client_index
+    label: "client{{ client_index }}"
+  register: wg_client_priv_results
+  become: true
+
+- name: Generate client public keys
+  ansible.builtin.command: wg pubkey
+  args:
+    stdin: "{{ client_priv.stdout }}"
+  loop: "{{ wg_client_priv_results.results }}"
+  loop_control:
+    loop_var: client_priv
+  register: wg_client_pub_results
+  become: true
+
+- name: Generate client preshared keys
+  ansible.builtin.command: wg genpsk
+  loop: "{{ range(1, wireguard_client_count + 1) | list }}"
+  loop_control:
+    loop_var: client_index
+    label: "client{{ client_index }}"
+  register: wg_client_psk_results
+  become: true
+
+# ----------------- BUILD wg_clients LIST -----------------
+
+- name: Initialize wg_clients fact
+  ansible.builtin.set_fact:
+    wg_clients: []
+
+- name: Build wg_clients from generated key material
+  ansible.builtin.set_fact:
+    wg_clients: "{{ wg_clients + [ {
+      'name': 'client' ~ (idx + 1),
+      'ip': wireguard_network_prefix ~ '.' ~ (2 + idx) ~ '/32',
+      'private': wg_client_priv_results.results[idx].stdout | trim,
+      'public': wg_client_pub_results.results[idx].stdout | trim,
+      'psk': wg_client_psk_results.results[idx].stdout | trim
+    } ] }}"
+  loop: "{{ range(0, wireguard_client_count) | list }}"
+  loop_control:
+    loop_var: idx
+
+# ----------------- SAVE CLIENT KEYS TO FILES -----------------
+
+- name: Ensure clients directory exists
+  ansible.builtin.file:
+    path: "{{ wireguard_clients_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+- name: Save client private keys
+  ansible.builtin.copy:
+    dest: "{{ wireguard_clients_dir }}/{{ item.name }}.key"
+    content: "{{ item.private }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ wg_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+- name: Save client public keys
+  ansible.builtin.copy:
+    dest: "{{ wireguard_clients_dir }}/{{ item.name }}.pub"
+    content: "{{ item.public }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ wg_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+- name: Save client preshared keys
+  ansible.builtin.copy:
+    dest: "{{ wireguard_clients_dir }}/{{ item.name }}.psk"
+    content: "{{ item.psk }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ wg_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+# ----------------- RENDER CONFIGS -----------------
+
+- name: Render server WireGuard config
+  ansible.builtin.template:
+    src: "wg0.conf.j2"
+    dest: "{{ wireguard_dir }}/{{ wireguard_interface }}.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart wireguard
+  become: true
+
+- name: Render client configuration files
+  ansible.builtin.template:
+    src: "client.conf.j2"
+    dest: "{{ wireguard_clients_dir }}/{{ item.name }}.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ wg_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+- name: Ensure wg-quick service enabled and started
+  ansible.builtin.service:
+    name: "wg-quick@{{ wireguard_interface }}"
+    enabled: true
+    state: started
+  become: true
+
+- name: Show WireGuard status
+  ansible.builtin.command: wg show
+  changed_when: false
+  register: wg_show_out
+  become: true
+
+- name: Print WireGuard status
+  ansible.builtin.debug:
+    var: wg_show_out.stdout
